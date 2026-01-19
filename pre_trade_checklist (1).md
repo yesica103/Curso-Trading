@@ -7,7 +7,7 @@
 
 ## 📋 SECCIÓN 1: ANÁLISIS TÉCNICO (5/5 requerido)
 
-- [ ] **Tendencia clara en H1/H4:** ¿Precio sobre/bajo EMA 50?
+- [ ] **Tendencia clara en H1/H4:** ¿Precio sobre/bajo EMA 100?
 - [ ] **Zona de soporte/resistencia identificada:** ¿Está en nivel clave?
 - [ ] **Patrón de precio válido:** ¿Breakout, pullback o rechazo confirmado?
 - [ ] **Volumen confirma movimiento:** ¿Incremento en últimas 2 velas?
