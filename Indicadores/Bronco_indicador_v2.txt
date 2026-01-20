@@ -1,0 +1,234 @@
+//@version=5
+indicator("Bronco indicadorv3", overlay=true)
+
+// ========== INPUTS ==========
+riskRewardRatio = input.float(2.0, "Risk:Reward Ratio", minval=0.5, step=0.1)
+lineLength = input.int(5, "Longitud de Líneas SL/Entry/TP", minval=1, maxval=20)
+accountSize = input.float(50000, "Tamaño de Cuenta (USD)", minval=100, step=1000)
+riskPercent = input.float(1.0, "Riesgo por Trade (%)", minval=0.1, maxval=10, step=0.1)
+instrumentType = input.string("GOLD", "Tipo de Instrumento", options=["GOLD", "FOREX"])
+maxVisibleMC = input.int(4, "Máximo de MC Visibles", minval=1, maxval=20, tooltip="Número máximo de Manipulation Candles que se mostrarán en el gráfico")
+
+// ========== OPCIONES DE VISUALIZACIÓN ==========
+showSL = input.bool(true, "Mostrar SL")
+showEntry = input.bool(true, "Mostrar Entry")
+showTP = input.bool(true, "Mostrar TP")
+showTable = input.bool(true, "Mostrar Tabla de Conteo")
+showMCColor = input.bool(true, "Colorear Velas MC")
+
+// ========== MANIPULATION CANDLE ==========
+prevHigh = high[1]
+prevLow = low[1]
+bullishMC = low < prevLow and high > prevHigh and close > prevHigh
+bearishMC = high > prevHigh and low < prevLow and close < prevLow
+barcolor(showMCColor and (bullishMC or bearishMC) ? color.blue : na)
+
+// ========== CONTADOR DE VELAS MC ==========
+var int bullishCount = 0
+var int bearishCount = 0
+var int totalCount = 0
+
+// ========== ARRAYS PARA CONTROL DE MC VISIBLES ==========
+var array<line> mcLines = array.new<line>()
+var array<label> mcLabels = array.new<label>()
+var int mcCounter = 0
+
+if bullishMC
+    bullishCount += 1
+    totalCount += 1
+    mcCounter += 1
+
+if bearishMC
+    bearishCount += 1
+    totalCount += 1
+    mcCounter += 1
+
+// ========== TABLA DE CONTEO ==========
+if showTable
+    var table countTable = table.new(position.top_right, 2, 4, border_width=1)
+    if barstate.islast
+        table.cell(countTable, 0, 0, "Tipo", bgcolor=color.gray, text_color=color.white, text_size=size.small)
+        table.cell(countTable, 1, 0, "Cantidad", bgcolor=color.gray, text_color=color.white, text_size=size.small)
+        
+        table.cell(countTable, 0, 1, "Bullish MC", bgcolor=color.new(color.green, 80), text_color=color.white, text_size=size.small)
+        table.cell(countTable, 1, 1, str.tostring(bullishCount), bgcolor=color.new(color.green, 80), text_color=color.white, text_size=size.small)
+        
+        table.cell(countTable, 0, 2, "Bearish MC", bgcolor=color.new(color.red, 80), text_color=color.white, text_size=size.small)
+        table.cell(countTable, 1, 2, str.tostring(bearishCount), bgcolor=color.new(color.red, 80), text_color=color.white, text_size=size.small)
+        
+        table.cell(countTable, 0, 3, "Total", bgcolor=color.new(color.blue, 80), text_color=color.white, text_size=size.small)
+        table.cell(countTable, 1, 3, str.tostring(totalCount), bgcolor=color.new(color.blue, 80), text_color=color.white, text_size=size.small)
+
+// ========== FUNCIÓN PARA CALCULAR LOTAJE ==========
+calcLotSize(accountSize, riskPercent, slDistance, instrumentType) =>
+    riskInDollars = accountSize * (riskPercent / 100)
+    lotSize = 0.0
+    
+    if instrumentType == "GOLD"
+        lotSize := riskInDollars / (slDistance * 100)
+    else
+        slDistanceInPips = slDistance * 10000
+        lotSize := riskInDollars / (slDistanceInPips * 10)
+    
+    lotSize := math.round(lotSize * 1000) / 1000
+    lotSize
+
+// ========== FUNCIÓN PARA LIMPIAR MC ANTIGUAS ==========
+cleanOldMC() =>
+    // Cada MC tiene 4 líneas y 3 labels
+    maxLines = maxVisibleMC * 4
+    maxLabels = maxVisibleMC * 3
+    
+    // Limpiar líneas antiguas
+    while array.size(mcLines) > maxLines
+        oldLine = array.shift(mcLines)
+        line.delete(oldLine)
+    
+    // Limpiar labels antiguos
+    while array.size(mcLabels) > maxLabels
+        oldLabel = array.shift(mcLabels)
+        label.delete(oldLabel)
+
+// ========== SL, ENTRY, TP PARA BULLISH MC ==========
+if bullishMC
+    slPrice = low
+    entryPrice = close
+    risk = entryPrice - slPrice
+    tpPrice = entryPrice + (risk * riskRewardRatio)
+    
+    lotSize = calcLotSize(accountSize, riskPercent, risk, instrumentType)
+    
+    // SL
+    if showSL
+        slLine = line.new(bar_index, slPrice, bar_index + lineLength, slPrice, color=color.red, width=2, style=line.style_solid)
+        slLabel = label.new(bar_index + lineLength, slPrice, "SL: " + str.tostring(slPrice, format.mintick) + " | Lotaje: " + str.tostring(lotSize, "#.###"), 
+                  style=label.style_label_left, color=color.red, textcolor=color.white, size=size.normal)
+        array.push(mcLines, slLine)
+        array.push(mcLabels, slLabel)
+    
+    // Entry
+    if showEntry
+        entryLine = line.new(bar_index, entryPrice, bar_index + lineLength, entryPrice, color=color.blue, width=2, style=line.style_solid)
+        entryLabel = label.new(bar_index + lineLength, entryPrice, "Entry: " + str.tostring(entryPrice, format.mintick), 
+                  style=label.style_label_left, color=color.blue, textcolor=color.white, size=size.normal)
+        array.push(mcLines, entryLine)
+        array.push(mcLabels, entryLabel)
+    
+    // TP
+    if showTP
+        tpLine = line.new(bar_index, tpPrice, bar_index + lineLength, tpPrice, color=color.green, width=2, style=line.style_solid)
+        tpLabel = label.new(bar_index + lineLength, tpPrice, "TP: " + str.tostring(tpPrice, format.mintick), 
+                  style=label.style_label_left, color=color.green, textcolor=color.white, size=size.normal)
+        array.push(mcLines, tpLine)
+        array.push(mcLabels, tpLabel)
+    
+    // Línea vertical conectora
+    if showSL or showTP
+        vertLine = line.new(bar_index, slPrice, bar_index, tpPrice, color=color.new(color.blue, 70), width=1, style=line.style_dashed)
+        array.push(mcLines, vertLine)
+    
+    // Limpiar MC antiguas
+    cleanOldMC()
+
+// ========== SL, ENTRY, TP PARA BEARISH MC ==========
+if bearishMC
+    slPrice = high
+    entryPrice = close
+    risk = slPrice - entryPrice
+    tpPrice = entryPrice - (risk * riskRewardRatio)
+    
+    lotSize = calcLotSize(accountSize, riskPercent, risk, instrumentType)
+    
+    // SL
+    if showSL
+        slLine = line.new(bar_index, slPrice, bar_index + lineLength, slPrice, color=color.red, width=2, style=line.style_solid)
+        slLabel = label.new(bar_index + lineLength, slPrice, "SL: " + str.tostring(slPrice, format.mintick) + " | Lotaje: " + str.tostring(lotSize, "#.###"), 
+                  style=label.style_label_left, color=color.red, textcolor=color.white, size=size.normal)
+        array.push(mcLines, slLine)
+        array.push(mcLabels, slLabel)
+    
+    // Entry
+    if showEntry
+        entryLine = line.new(bar_index, entryPrice, bar_index + lineLength, entryPrice, color=color.blue, width=2, style=line.style_solid)
+        entryLabel = label.new(bar_index + lineLength, entryPrice, "Entry: " + str.tostring(entryPrice, format.mintick), 
+                  style=label.style_label_left, color=color.blue, textcolor=color.white, size=size.normal)
+        array.push(mcLines, entryLine)
+        array.push(mcLabels, entryLabel)
+    
+    // TP
+    if showTP
+        tpLine = line.new(bar_index, tpPrice, bar_index + lineLength, tpPrice, color=color.green, width=2, style=line.style_solid)
+        tpLabel = label.new(bar_index + lineLength, tpPrice, "TP: " + str.tostring(tpPrice, format.mintick), 
+                  style=label.style_label_left, color=color.green, textcolor=color.white, size=size.normal)
+        array.push(mcLines, tpLine)
+        array.push(mcLabels, tpLabel)
+    
+    // Línea vertical conectora
+    if showSL or showTP
+        vertLine = line.new(bar_index, tpPrice, bar_index, slPrice, color=color.new(color.blue, 70), width=1, style=line.style_dashed)
+        array.push(mcLines, vertLine)
+    
+    // Limpiar MC antiguas
+    cleanOldMC()
+
+// ========== OFFSETS ==========
+lineLen = 20
+labelGap = 5
+
+// ========== HTF LEVELS ==========
+pwHigh = request.security(syminfo.tickerid, "W", high[1], barmerge.gaps_off, barmerge.lookahead_off)
+pdHigh = request.security(syminfo.tickerid, "D", high[1], barmerge.gaps_off, barmerge.lookahead_off)
+pdLow = request.security(syminfo.tickerid, "D", low[1], barmerge.gaps_off, barmerge.lookahead_off)
+dailyOpen = request.security(syminfo.tickerid, "D", open, barmerge.gaps_off, barmerge.lookahead_off)
+
+// ========== PWH ==========
+var line pwhLine = na
+var label pwhLabel = na
+if na(pwhLine)
+    pwhLine := line.new(bar_index, pwHigh, bar_index + lineLen, pwHigh, color=color.orange, width=2)
+    pwhLabel := label.new(bar_index, pwHigh, "PWH", style=label.style_label_right, color=color.orange, textcolor=color.white, size=size.tiny)
+else
+    line.set_y1(pwhLine, pwHigh)
+    line.set_y2(pwhLine, pwHigh)
+    line.set_x2(pwhLine, bar_index + lineLen)
+    label.set_y(pwhLabel, pwHigh)
+    label.set_x(pwhLabel, bar_index + lineLen + labelGap)
+
+// ========== PDH ==========
+var line pdhLine = na
+var label pdhLabel = na
+if na(pdhLine)
+    pdhLine := line.new(bar_index, pdHigh, bar_index + lineLen, pdHigh, color=color.gray, width=1)
+    pdhLabel := label.new(bar_index, pdHigh, "PDH", style=label.style_label_right, color=color.gray, textcolor=color.white, size=size.tiny)
+else
+    line.set_y1(pdhLine, pdHigh)
+    line.set_y2(pdhLine, pdHigh)
+    line.set_x2(pdhLine, bar_index + lineLen)
+    label.set_y(pdhLabel, pdHigh)
+    label.set_x(pdhLabel, bar_index + lineLen + labelGap)
+
+// ========== PDL (NUEVO) ==========
+var line pdlLine = na
+var label pdlLabel = na
+if na(pdlLine)
+    pdlLine := line.new(bar_index, pdLow, bar_index + lineLen, pdLow, color=color.purple, width=1)
+    pdlLabel := label.new(bar_index, pdLow, "PDL", style=label.style_label_right, color=color.purple, textcolor=color.white, size=size.tiny)
+else
+    line.set_y1(pdlLine, pdLow)
+    line.set_y2(pdlLine, pdLow)
+    line.set_x2(pdlLine, bar_index + lineLen)
+    label.set_y(pdlLabel, pdLow)
+    label.set_x(pdlLabel, bar_index + lineLen + labelGap)
+
+// ========== DAILY OPEN ==========
+var line doLine = na
+var label doLabel = na
+if na(doLine)
+    doLine := line.new(bar_index, dailyOpen, bar_index + lineLen, dailyOpen, color=color.blue, width=1, style=line.style_dotted)
+    doLabel := label.new(bar_index, dailyOpen, "Daily Open", style=label.style_label_right, color=color.blue, textcolor=color.white, size=size.tiny)
+else
+    line.set_y1(doLine, dailyOpen)
+    line.set_y2(doLine, dailyOpen)
+    line.set_x2(doLine, bar_index + lineLen)
+    label.set_y(doLabel, dailyOpen)
+    label.set_x(doLabel, bar_index + lineLen + labelGap)
