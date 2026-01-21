@@ -1,175 +1,140 @@
 //@version=5
-indicator("Bronco indicadorv3", overlay=true)
+indicator("Bronco indicador v3", overlay=true, max_lines_count=500, max_labels_count=500)
 
 // ========== INPUTS ==========
-riskRewardRatio = input.float(2.0, "Risk:Reward Ratio", minval=0.5, step=0.1)
-lineLength = input.int(5, "Longitud de Líneas SL/Entry/TP", minval=1, maxval=20)
-accountSize = input.float(50000, "Tamaño de Cuenta (USD)", minval=100, step=1000)
-riskPercent = input.float(1.0, "Riesgo por Trade (%)", minval=0.1, maxval=10, step=0.1)
-instrumentType = input.string("GOLD", "Tipo de Instrumento", options=["GOLD", "FOREX"])
-maxVisibleMC = input.int(4, "Máximo de MC Visibles", minval=1, maxval=20, tooltip="Número máximo de Manipulation Candles que se mostrarán en el gráfico")
+riskRewardRatio = input.float(2.0, "Risk:Reward Ratio", minval=0.5)
+lineLength      = 2
+accountSize     = input.float(50000, "Tamaño de Cuenta")
+riskPercent     = input.float(1.0, "Riesgo %")
+instrumentType  = input.string("GOLD", "Instrumento", options=["GOLD", "FOREX"])
+maxVisibleMC    = input.int(1, "Máximo MC visibles", minval=1)
 
-// ========== OPCIONES DE VISUALIZACIÓN ==========
-showSL = input.bool(true, "Mostrar SL")
-showEntry = input.bool(true, "Mostrar Entry")
-showTP = input.bool(true, "Mostrar TP")
-showTable = input.bool(true, "Mostrar Tabla de Conteo")
-showMCColor = input.bool(true, "Colorear Velas MC")
+// ========== VISUAL ==========
+showSL = input.bool(true)
+showEntry = input.bool(true)
+showTP = input.bool(true)
+showMCColor = input.bool(true)
+showInfotable = input(true,"Mostrar panel de información")
 
-// ========== MANIPULATION CANDLE ==========
-prevHigh = high[1]
-prevLow = low[1]
-bullishMC = low < prevLow and high > prevHigh and close > prevHigh
-bearishMC = high > prevHigh and low < prevLow and close < prevLow
+// ========== MC ==========
+bullishMC = low < low[1] and high > high[1] and close > high[1]
+bearishMC = high > high[1] and low < low[1] and close < low[1]
+
 barcolor(showMCColor and (bullishMC or bearishMC) ? color.blue : na)
 
-// ========== CONTADOR DE VELAS MC ==========
-var int bullishCount = 0
-var int bearishCount = 0
-var int totalCount = 0
+// ========== Tabla informativa de calculo de lotaje ==========
 
-// ========== ARRAYS PARA CONTROL DE MC VISIBLES ==========
-var array<line> mcLines = array.new<line>()
-var array<label> mcLabels = array.new<label>()
-var int mcCounter = 0
+var table infoTable = table.new(position.top_center, 2, 3, border_width=4)
 
+if showInfotable and barstate.islast
+    table.cell(infoTable, 0, 0, "Operación", bgcolor=color.gray, text_color=color.white)
+    table.cell(infoTable, 1, 0, instrumentType)
+
+    table.cell(infoTable, 0, 1, "Cuenta", bgcolor=color.gray, text_color=color.white)
+    table.cell(infoTable, 1, 1, "$" + str.tostring(accountSize, "#,###"))
+
+    table.cell(infoTable, 0, 2, "Riesgo %", bgcolor=color.gray, text_color=color.white)
+    table.cell(infoTable, 1, 2, str.tostring(riskPercent, "#.##") + "%")
+
+
+
+// ========== ARRAYS ==========
+var array<line>  mcLines   = array.new<line>()
+var array<label> mcLabels  = array.new<label>()
+var array<int>   mcLineQty = array.new<int>()
+var array<int>   mcLabQty  = array.new<int>()
+
+// ========== LOTAJE ==========
+calcLot(account, riskP, slDist, inst) =>
+    riskUSD = account * riskP / 100
+    lot = inst == "GOLD" ? riskUSD / (slDist * 100) : riskUSD / ((slDist * 10000) * 10)
+    math.round(lot * 1000) / 1000
+
+// ========== DELETE ==========
+deleteOldestMC() =>
+    lq = array.shift(mcLineQty)
+    bq = array.shift(mcLabQty)
+    for i = 0 to lq - 1
+        line.delete(array.shift(mcLines))
+    for i = 0 to bq - 1
+        label.delete(array.shift(mcLabels))
+
+controlVisibleMC() =>
+    while array.size(mcLineQty) > maxVisibleMC
+        deleteOldestMC()
+
+// ========== BULLISH ==========
 if bullishMC
-    bullishCount += 1
-    totalCount += 1
-    mcCounter += 1
+    int linesCreated = 0
+    int labelsCreated = 0
 
-if bearishMC
-    bearishCount += 1
-    totalCount += 1
-    mcCounter += 1
+    sl = low
+    entry = close
+    risk = entry - sl
+    tp = entry + risk * riskRewardRatio
+    lot = calcLot(accountSize, riskPercent, risk, instrumentType)
 
-// ========== TABLA DE CONTEO ==========
-if showTable
-    var table countTable = table.new(position.top_right, 2, 4, border_width=1)
-    if barstate.islast
-        table.cell(countTable, 0, 0, "Tipo", bgcolor=color.gray, text_color=color.white, text_size=size.small)
-        table.cell(countTable, 1, 0, "Cantidad", bgcolor=color.gray, text_color=color.white, text_size=size.small)
-        
-        table.cell(countTable, 0, 1, "Bullish MC", bgcolor=color.new(color.green, 80), text_color=color.white, text_size=size.small)
-        table.cell(countTable, 1, 1, str.tostring(bullishCount), bgcolor=color.new(color.green, 80), text_color=color.white, text_size=size.small)
-        
-        table.cell(countTable, 0, 2, "Bearish MC", bgcolor=color.new(color.red, 80), text_color=color.white, text_size=size.small)
-        table.cell(countTable, 1, 2, str.tostring(bearishCount), bgcolor=color.new(color.red, 80), text_color=color.white, text_size=size.small)
-        
-        table.cell(countTable, 0, 3, "Total", bgcolor=color.new(color.blue, 80), text_color=color.white, text_size=size.small)
-        table.cell(countTable, 1, 3, str.tostring(totalCount), bgcolor=color.new(color.blue, 80), text_color=color.white, text_size=size.small)
-
-// ========== FUNCIÓN PARA CALCULAR LOTAJE ==========
-calcLotSize(accountSize, riskPercent, slDistance, instrumentType) =>
-    riskInDollars = accountSize * (riskPercent / 100)
-    lotSize = 0.0
-    
-    if instrumentType == "GOLD"
-        lotSize := riskInDollars / (slDistance * 100)
-    else
-        slDistanceInPips = slDistance * 10000
-        lotSize := riskInDollars / (slDistanceInPips * 10)
-    
-    lotSize := math.round(lotSize * 1000) / 1000
-    lotSize
-
-// ========== FUNCIÓN PARA LIMPIAR MC ANTIGUAS ==========
-cleanOldMC() =>
-    // Cada MC tiene 4 líneas y 3 labels
-    maxLines = maxVisibleMC * 4
-    maxLabels = maxVisibleMC * 3
-    
-    // Limpiar líneas antiguas
-    while array.size(mcLines) > maxLines
-        oldLine = array.shift(mcLines)
-        line.delete(oldLine)
-    
-    // Limpiar labels antiguos
-    while array.size(mcLabels) > maxLabels
-        oldLabel = array.shift(mcLabels)
-        label.delete(oldLabel)
-
-// ========== SL, ENTRY, TP PARA BULLISH MC ==========
-if bullishMC
-    slPrice = low
-    entryPrice = close
-    risk = entryPrice - slPrice
-    tpPrice = entryPrice + (risk * riskRewardRatio)
-    
-    lotSize = calcLotSize(accountSize, riskPercent, risk, instrumentType)
-    
-    // SL
     if showSL
-        slLine = line.new(bar_index, slPrice, bar_index + lineLength, slPrice, color=color.red, width=2, style=line.style_solid)
-        slLabel = label.new(bar_index + lineLength, slPrice, "SL: " + str.tostring(slPrice, format.mintick) + " | Lotaje: " + str.tostring(lotSize, "#.###"), 
-                  style=label.style_label_left, color=color.red, textcolor=color.white, size=size.normal)
-        array.push(mcLines, slLine)
-        array.push(mcLabels, slLabel)
-    
-    // Entry
-    if showEntry
-        entryLine = line.new(bar_index, entryPrice, bar_index + lineLength, entryPrice, color=color.blue, width=2, style=line.style_solid)
-        entryLabel = label.new(bar_index + lineLength, entryPrice, "Entry: " + str.tostring(entryPrice, format.mintick), 
-                  style=label.style_label_left, color=color.blue, textcolor=color.white, size=size.normal)
-        array.push(mcLines, entryLine)
-        array.push(mcLabels, entryLabel)
-    
-    // TP
-    if showTP
-        tpLine = line.new(bar_index, tpPrice, bar_index + lineLength, tpPrice, color=color.green, width=2, style=line.style_solid)
-        tpLabel = label.new(bar_index + lineLength, tpPrice, "TP: " + str.tostring(tpPrice, format.mintick), 
-                  style=label.style_label_left, color=color.green, textcolor=color.white, size=size.normal)
-        array.push(mcLines, tpLine)
-        array.push(mcLabels, tpLabel)
-    
-    // Línea vertical conectora
-    if showSL or showTP
-        vertLine = line.new(bar_index, slPrice, bar_index, tpPrice, color=color.new(color.blue, 70), width=1, style=line.style_dashed)
-        array.push(mcLines, vertLine)
-    
-    // Limpiar MC antiguas
-    cleanOldMC()
+        array.push(mcLines, line.new(bar_index, sl, bar_index + lineLength, sl, color=color.red, width=2))
+        array.push(mcLabels, label.new(bar_index + lineLength, sl, "Buy - Long \n SL: "+ str.tostring(sl, "#.###") + "\nLote:  " + str.tostring(lot), style = label.style_label_left, color=color.red, textcolor = color.white, size=size.normal))
+        linesCreated += 1
+        labelsCreated += 1
 
-// ========== SL, ENTRY, TP PARA BEARISH MC ==========
-if bearishMC
-    slPrice = high
-    entryPrice = close
-    risk = slPrice - entryPrice
-    tpPrice = entryPrice - (risk * riskRewardRatio)
-    
-    lotSize = calcLotSize(accountSize, riskPercent, risk, instrumentType)
-    
-    // SL
-    if showSL
-        slLine = line.new(bar_index, slPrice, bar_index + lineLength, slPrice, color=color.red, width=2, style=line.style_solid)
-        slLabel = label.new(bar_index + lineLength, slPrice, "SL: " + str.tostring(slPrice, format.mintick) + " | Lotaje: " + str.tostring(lotSize, "#.###"), 
-                  style=label.style_label_left, color=color.red, textcolor=color.white, size=size.normal)
-        array.push(mcLines, slLine)
-        array.push(mcLabels, slLabel)
-    
-    // Entry
     if showEntry
-        entryLine = line.new(bar_index, entryPrice, bar_index + lineLength, entryPrice, color=color.blue, width=2, style=line.style_solid)
-        entryLabel = label.new(bar_index + lineLength, entryPrice, "Entry: " + str.tostring(entryPrice, format.mintick), 
-                  style=label.style_label_left, color=color.blue, textcolor=color.white, size=size.normal)
-        array.push(mcLines, entryLine)
-        array.push(mcLabels, entryLabel)
-    
-    // TP
+        array.push(mcLines, line.new(bar_index, entry, bar_index + lineLength, entry, color=color.blue, width=2))
+        array.push(mcLabels, label.new(bar_index + lineLength, entry, "Entry" + str.tostring(entry, "#.####"), style = label.style_label_left, color=color.blue, textcolor = color.white, size=size.normal))
+        linesCreated += 1
+        labelsCreated += 1
+
     if showTP
-        tpLine = line.new(bar_index, tpPrice, bar_index + lineLength, tpPrice, color=color.green, width=2, style=line.style_solid)
-        tpLabel = label.new(bar_index + lineLength, tpPrice, "TP: " + str.tostring(tpPrice, format.mintick), 
-                  style=label.style_label_left, color=color.green, textcolor=color.white, size=size.normal)
-        array.push(mcLines, tpLine)
-        array.push(mcLabels, tpLabel)
-    
-    // Línea vertical conectora
-    if showSL or showTP
-        vertLine = line.new(bar_index, tpPrice, bar_index, slPrice, color=color.new(color.blue, 70), width=1, style=line.style_dashed)
-        array.push(mcLines, vertLine)
-    
-    // Limpiar MC antiguas
-    cleanOldMC()
+        array.push(mcLines, line.new(bar_index, tp, bar_index + lineLength, tp, color=color.green, width=2))
+        array.push(mcLabels, label.new(bar_index + lineLength, tp, "TP: "+ str.tostring(tp, "#.###") , style=label.style_label_left, color=color.green, textcolor = color.white, size=size.normal))
+        linesCreated += 1
+        labelsCreated += 1
+
+    array.push(mcLines, line.new(bar_index, sl, bar_index, tp, style=line.style_dashed))
+    linesCreated += 1
+
+    array.push(mcLineQty, linesCreated)
+    array.push(mcLabQty, labelsCreated)
+    controlVisibleMC()
+
+// ========== BEARISH ==========
+if bearishMC
+    int linesCreated = 0
+    int labelsCreated = 0
+
+    sl = high
+    entry = close
+    risk = sl - entry
+    tp = entry - risk * riskRewardRatio
+    lot = calcLot(accountSize, riskPercent, risk, instrumentType)
+
+    if showSL
+        array.push(mcLines, line.new(bar_index, sl, bar_index + lineLength, sl, color=color.red, width=2))
+        array.push(mcLabels, label.new(bar_index + lineLength, sl , "Sell- Short \nSL " + str.tostring(sl, format.mintick) +"\nLote " + str.tostring(lot), style=label.style_label_left, color=color.red, textcolor=color.white, size=size.normal))
+        linesCreated += 1
+        labelsCreated += 1
+
+    if showEntry
+        array.push(mcLines, line.new(bar_index, entry, bar_index + lineLength, entry, color=color.blue, width=2))
+        array.push(mcLabels, label.new(bar_index + lineLength, entry, "Entrada: "+str.tostring(entry,"#.####"), style = label.style_label_left, color=color.blue, textcolor = color.white, size=size.normal ))
+        linesCreated += 1
+        labelsCreated += 1
+
+    if showTP
+        array.push(mcLines, line.new(bar_index, tp, bar_index + lineLength, tp, color=color.green, width=2))
+        array.push(mcLabels, label.new(bar_index + lineLength, tp, "TP: "+ str.tostring(tp, "#.####"), style = label.style_label_left, color=color.green, textcolor = color.white, size=size.normal))
+        linesCreated += 1
+        labelsCreated += 1
+
+    array.push(mcLines, line.new(bar_index, tp, bar_index, sl, style=line.style_dashed))
+    linesCreated += 1
+
+    array.push(mcLineQty, linesCreated)
+    array.push(mcLabQty, labelsCreated)
+    controlVisibleMC()
+
 
 // ========== OFFSETS ==========
 lineLen = 20
